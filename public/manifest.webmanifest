@@ -1,0 +1,10 @@
+{
+  "name": "Portrait facile",
+  "short_name": "Portrait facile",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f7f3",
+  "theme_color": "#f8f7f3",
+  "description": "Guide de construction pour dessiner un portrait.",
+  "icons": []
+}
