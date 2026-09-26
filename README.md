@@ -1,12 +1,12 @@
 # Portrait facile
 
-Portrait facile est une SPA locale de référence pour le dessin de portrait. Elle permet d'importer une image, superposer un guide de construction ajustable, comparer avec une aide assistée et exporter une version finale prête à travailler.
+Portrait facile est une SPA locale de référence pour le dessin de portrait. Elle permet d'importer une image, superposer un guide de construction ajustable, comparer avec une aide assistée et exporter une version finale prête à travailler. Le produit évolue progressivement vers un Portrait Construction Rig partagé plutôt qu'une collection de repères 2D indépendants.
 
 ## Ce qui est livré
 
 - Import d'image JPG / PNG / WebP
 - Grille de construction et repères de face
-- Trois niveaux de guide : essentiel, standard, détaillé
+- Quatre niveaux de guide : essentiel, construction, détaillé, expert
 - Ajustements manuels du guide : décalage horizontal, vertical, taille du visage
 - Contrôle d'opacité, zoom et mode d'affichage
 - Assistance visuelle MediaPipe optionnelle, non autoritaire et explicitement assistive
@@ -15,6 +15,10 @@ Portrait facile est une SPA locale de référence pour le dessin de portrait. El
 - Création, duplication, renommage, switch et suppression de projets
 - Export PNG de la composition finale
 - PWA installable basique avec service worker
+- Modèle canonique de tête versionné en coordonnées 3D normalisées, socle du rig paramétrique
+- Bibliothèque de départ Front / 3/4 gauche / 3/4 droit / profils gauche et droit, sur le même rig paramétrique
+- Ajustement initial assisté par repères MediaPipe (échelle, position et roulis), toujours vérifiable et corrigeable à la main
+- Méthodes canonique, Loomis, Reilly et Asaro dérivées du rig partagé, sélectionnées et sauvegardées par projet
 
 ## Démarrer
 
@@ -36,6 +40,7 @@ npm run build
 - Canvas 2D : rendu direct à la demande, export net, sans surcharge inutile
 - IndexedDB : persistance des projets et des réglages côté navigateur
 - VisionProvider : contrat explicite pour des services assistifs futurs, avec MediaPipe comme implémentation réelle et optionnelle
+- Portrait Construction Rig : socle géométrique indépendant de la résolution, paramétrable et versionné, avec projections de face, 3/4 et profil
 - PWA : manifest et service worker minimaux pour un lancement local plus proche d'une vraie app
 
 ## Philosophie produit
@@ -45,9 +50,12 @@ L'application ne prétend pas détecter une vérité objective du visage. Elle f
 ## Limites claires
 
 - L'analyse assistée est utile mais limitée et non certaine
+- Le fitting ne reconstruit pas le visage et ne modifie pas ses proportions ; il propose seulement un cadrage global borné et une inclinaison indicative
+- Les méthodes Loomis, Reilly et Asaro sont des couches de construction schématiques, pas des reproductions exhaustives de cours ou de modèles anatomiques
 - La couche d'assistance n'est pas une preuve de ressemblance ou de fidélité anatomique
+- Le modèle canonique reste un gabarit de construction heuristique ; les vues latérales sont des projections pseudo-3D, pas une reconstruction anatomique
 - L'app est une base solide pour un outil de travail localiste, mais pas encore un studio complet de retouche de portrait
 
 ## Suivant possible
 
-Les axes de progression réalistes restent : export plus riche, historique de versions, comparaison de projets, et éventuellement un moteur de guide plus avancé basé sur des modèles de proportion plus solides.
+L'édition directe du regard et de l'expression reste à intégrer ; les méthodes dérivées partagent toujours le même modèle canonique.

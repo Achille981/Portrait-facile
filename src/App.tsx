@@ -1,30 +1,108 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
-import { getPortraitGuideMetrics } from './domain/portraitGuides'
+import { createPortraitRig, defaultPortraitRigParameters, initializePortraitRigView, portraitRigViewPresets } from './domain/portraitRig'
+import type { PortraitRigDimensions, PortraitRigPose, PortraitRigView } from './domain/portraitRig'
+import { getRelevantPortraitRigGuides, projectPortraitRig } from './domain/portraitRigProjection'
+import type { ProjectedPortraitRigGuide } from './domain/portraitRigProjection'
+import { suggestReferenceFit } from './domain/referenceFitting'
+import { derivePortraitConstructionModel, portraitConstructionMethods } from './domain/derivedPortraitModels'
+import type { PortraitConstructionMethod } from './domain/derivedPortraitModels'
 import { createVisionProvider } from './services/visionProvider'
 import { useProjectStore } from './stores/projectStore'
 import type { GuideDisplayMode, GuideLevel, VisionProviderName } from './types/project'
+import type { VisionLandmark } from './types/vision'
 import './App.css'
 
 const levelLabels: Record<GuideLevel, string> = {
   essential: 'Essentiel',
-  standard: 'Standard',
+  construction: 'Construction',
   detailed: 'Détaillé',
+  expert: 'Expert',
 }
 
-const emptyVisionLandmarks: Array<{ x: number; y: number }> = []
+const emptyVisionLandmarks: VisionLandmark[] = []
+
+const guideLevelRank = {
+  essential: 1,
+  construction: 2,
+  detailed: 3,
+  expert: 4,
+} as const
+
+const guideColors: Record<ProjectedPortraitRigGuide['category'], string> = {
+  cranium: '#d86b54',
+  structure: '#d86b54',
+  axes: '#607f9d',
+  proportions: '#e5a048',
+  eyes: '#607f9d',
+  eyebrows: '#607f9d',
+  nose: '#607f9d',
+  mouth: '#607f9d',
+  jaw: '#d86b54',
+  ears: '#607f9d',
+  neck: '#d86b54',
+}
+
+function drawPortraitGuides(
+  context: CanvasRenderingContext2D,
+  guides: ProjectedPortraitRigGuide[],
+  level: GuideLevel,
+  imageWidth: number,
+  imageHeight: number,
+) {
+  const maxLevel = guideLevelRank[level]
+  const lineScale = Math.max(0.8, Math.min(1.5, Math.min(imageWidth, imageHeight) / 700))
+
+  guides.forEach((guide) => {
+    if (!guide.visibility || guideLevelRank[guide.level] > maxLevel) return
+    const geometry = guide.geometry
+    context.strokeStyle = guideColors[guide.category]
+    context.fillStyle = guideColors[guide.category]
+    context.lineWidth = (guide.style === 'volume' ? 1.5 : 1.1) * lineScale
+    context.setLineDash(guide.style === 'volume' ? [7 * lineScale, 5 * lineScale] : [])
+    context.beginPath()
+
+    if (geometry.kind === 'point') {
+      context.arc(
+        geometry.position.x * imageWidth,
+        geometry.position.y * imageHeight,
+        2.5 * lineScale,
+        0,
+        Math.PI * 2,
+      )
+      context.fill()
+      return
+    }
+
+    const points = geometry.kind === 'line'
+      ? [geometry.from, geometry.to]
+      : geometry.points
+    if (points.length === 0) return
+
+    context.moveTo(points[0].x * imageWidth, points[0].y * imageHeight)
+    points.slice(1).forEach((point) => context.lineTo(point.x * imageWidth, point.y * imageHeight))
+    if (geometry.kind === 'polyline' && geometry.closed) context.closePath()
+    context.stroke()
+    context.setLineDash([])
+  })
+}
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imageRef = useRef<HTMLImageElement | null>(null)
+  const drawRef = useRef<() => void>(() => {})
   const frameRef = useRef<HTMLDivElement>(null)
   const { project, setProject, isReady, projectList, activeProjectId, switchProject, createProject, duplicateProject, renameProject, deleteProject } = useProjectStore()
   const [isDragging, setIsDragging] = useState(false)
+  const [fitRequest, setFitRequest] = useState<{ projectId: string; imageUrl: string } | null>(null)
   const [transientStatus, setTransientStatus] = useState<string | null>(null)
+  const fitRequestRef = useRef(0)
+  const activeReferenceRef = useRef({ projectId: project.id, imageUrl: project.imageDataUrl ?? '', updatedAt: project.updatedAt })
+  const isFitPending = fitRequest?.projectId === project.id && fitRequest.imageUrl === (project.imageDataUrl ?? '')
   const [visionResult, setVisionResult] = useState<{
     imageUrl: string
     providerName: VisionProviderName
-    landmarks: Array<{ x: number; y: number }>
+    landmarks: VisionLandmark[]
   } | null>(null)
 
   const imageUrl = project.imageDataUrl ?? ''
@@ -35,6 +113,9 @@ function App() {
   const opacity = project.opacity
   const zoom = project.zoom
   const guideAdjustments = project.guideAdjustments
+  const rigParameters = project.rigParameters
+  const rigView = project.rigView
+  const constructionMethod = project.constructionMethod
   const visionProviderName = project.visionProvider
   const visionEnabled = project.visionEnabled
   const guideDisplayMode = project.guideDisplayMode
@@ -43,6 +124,11 @@ function App() {
     && visionResult?.imageUrl === imageUrl && visionResult.providerName === visionProviderName
     ? visionResult.landmarks
     : emptyVisionLandmarks
+  const rig = useMemo(() => createPortraitRig(rigParameters), [rigParameters])
+  const constructionModel = useMemo(
+    () => derivePortraitConstructionModel(rig, constructionMethod),
+    [constructionMethod, rig],
+  )
 
   const updateProject = useCallback((patch: Partial<typeof project>) => {
     setProject((current) => ({
@@ -51,6 +137,55 @@ function App() {
       updatedAt: Date.now(),
     }))
   }, [setProject])
+
+  const updateRigDimension = (key: keyof PortraitRigDimensions, value: number) => {
+    updateProject({
+      rigParameters: {
+        ...rigParameters,
+        dimensions: { ...rigParameters.dimensions, [key]: value },
+      },
+    })
+  }
+
+  const updateRigPose = (key: keyof PortraitRigPose, value: number) => {
+    const nextRigView: PortraitRigView = key === 'yaw'
+      ? value <= -68
+        ? 'profile-left'
+        : value >= 68
+          ? 'profile-right'
+          : value < -16
+            ? 'three-quarter-left'
+            : value > 16
+              ? 'three-quarter-right'
+              : 'front'
+      : rigView
+    updateProject({
+      rigView: nextRigView,
+      rigParameters: {
+        ...rigParameters,
+        pose: { ...rigParameters.pose, [key]: value },
+        ...(key === 'yaw' ? {
+          camera: {
+            ...rigParameters.camera,
+            perspective: 0.18 + Math.min(Math.abs(value) / 82, 1) * 0.6,
+          },
+        } : {}),
+      },
+    })
+  }
+
+  const selectRigView = (view: PortraitRigView) => {
+    updateProject({
+      rigView: view,
+      rigParameters: initializePortraitRigView(view, rigParameters),
+    })
+    setTransientStatus(`Modèle ${portraitRigViewPresets[view].label} sélectionné · point de départ manuel`)
+  }
+
+  const selectConstructionMethod = (method: PortraitConstructionMethod) => {
+    updateProject({ constructionMethod: method })
+    setTransientStatus(`Méthode ${portraitConstructionMethods[method].label} sélectionnée · dérivée du rig canonique`)
+  }
 
   const status = transientStatus ?? (isReady && (project.imageDataUrl || project.fileName)
     ? 'Projet restauré depuis le stockage local'
@@ -65,20 +200,18 @@ function App() {
     const provider = createVisionProvider(visionProviderName)
     provider.analyze(imageUrl).then((result) => {
       if (!active) return
-      if (!result.isAvailable || !result.suggestion) {
+      if (!result.suggestion) {
+        if (result.error) setTransientStatus(result.error)
         setVisionResult({ imageUrl, providerName: visionProviderName, landmarks: [] })
         return
       }
 
-      const message = `${result.suggestion.label} · confiance ${result.suggestion.confidence.toFixed(2)}`
-      setTransientStatus(message)
+      setTransientStatus(result.suggestion.label)
       setVisionResult({
         imageUrl,
         providerName: visionProviderName,
         landmarks: result.suggestion.landmarks,
       })
-    }).catch(() => {
-      if (active) setVisionResult({ imageUrl, providerName: visionProviderName, landmarks: [] })
     })
 
     return () => {
@@ -86,13 +219,86 @@ function App() {
     }
   }, [imageUrl, visionEnabled, visionProviderName])
 
+  useLayoutEffect(() => {
+    activeReferenceRef.current = { projectId: project.id, imageUrl, updatedAt: project.updatedAt }
+  }, [imageUrl, project.id, project.updatedAt])
+
+  const fitReference = async () => {
+    if (!imageUrl || !imageRef.current || isFitPending) return
+
+    const requestId = ++fitRequestRef.current
+    const requestedProjectId = project.id
+    const requestedImageUrl = imageUrl
+    const requestedUpdatedAt = project.updatedAt
+    const referenceImage = imageRef.current
+    setFitRequest({ projectId: requestedProjectId, imageUrl: requestedImageUrl })
+    setTransientStatus('Analyse locale de la référence en cours…')
+
+    try {
+      const result = await createVisionProvider('mediapipe').analyze(requestedImageUrl)
+      const activeReference = activeReferenceRef.current
+      if (requestId !== fitRequestRef.current
+        || activeReference.projectId !== requestedProjectId
+        || activeReference.imageUrl !== requestedImageUrl) return
+      if (activeReference.updatedAt !== requestedUpdatedAt) {
+        setTransientStatus('Projet modifié pendant l’analyse · proposition ignorée pour préserver vos corrections')
+        return
+      }
+
+      if (!result.suggestion) {
+        setTransientStatus(result.error ?? 'Aucun repère fiable ; le guide n’a pas été modifié.')
+        return
+      }
+
+      const suggestion = suggestReferenceFit(
+        result.suggestion.landmarks,
+        rigParameters,
+        referenceImage.naturalWidth,
+        referenceImage.naturalHeight,
+      )
+      if (!suggestion) {
+        setTransientStatus('Repères insuffisants ou incohérents ; le guide n’a pas été modifié.')
+        return
+      }
+
+      updateProject({
+        guideAdjustments: suggestion.guideAdjustments,
+        rigParameters: suggestion.rigParameters,
+      })
+      setVisionResult({
+        imageUrl: requestedImageUrl,
+        providerName: 'mediapipe',
+        landmarks: result.suggestion.landmarks,
+      })
+      const qualityMessage = suggestion.quality === 'stable'
+        ? 'repères cohérents'
+        : 'vérification manuelle conseillée'
+      const clampMessage = suggestion.wasClamped ? ' · correction limitée aux plages sûres' : ''
+      setTransientStatus(`Ajustement initial appliqué · ${qualityMessage}${clampMessage} · corrigez-le si besoin`)
+    } finally {
+      if (requestId === fitRequestRef.current) setFitRequest(null)
+    }
+  }
+
   useEffect(() => {
     if (imageUrl) {
+      let active = true
       const image = new Image()
       image.onload = () => {
+        if (!active) return
         imageRef.current = image
+        drawRef.current()
       }
+      image.onerror = () => {
+        if (active) setTransientStatus('Impossible de décoder cette image dans le navigateur.')
+      }
+      imageRef.current = null
       image.src = imageUrl
+      return () => {
+        active = false
+        image.onload = null
+        image.onerror = null
+      }
     } else {
       imageRef.current = null
     }
@@ -132,8 +338,6 @@ function App() {
     const ratio = window.devicePixelRatio || 1
     canvas.width = width * ratio
     canvas.height = height * ratio
-    canvas.style.width = `${width}px`
-    canvas.style.height = `${height}px`
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
     context.clearRect(0, 0, width, height)
     context.fillStyle = '#ede9e1'
@@ -171,62 +375,15 @@ function App() {
       }
     }
     if ((guideDisplayMode === 'both' || guideDisplayMode === 'guide') && guidesVisible) {
-      const metrics = getPortraitGuideMetrics(imageWidth, imageHeight, level, guideAdjustments)
-      const {
-        centerX,
-        centerY,
-        headWidth,
-        headHeight,
-        eyeY,
-        noseY,
-        mouthY,
-        leftVerticalX,
-        rightVerticalX,
-        faceTilt,
-        faceOutlineRadiusX,
-        faceOutlineRadiusY,
-        horizontalGuideY,
-      } = metrics
-
-      context.strokeStyle = '#d86b54'
-      context.fillStyle = '#d86b54'
-      context.lineWidth = 2
-      context.setLineDash([8, 6])
-      context.beginPath()
-      context.ellipse(centerX, centerY, faceOutlineRadiusX, faceOutlineRadiusY, faceTilt, 0, Math.PI * 2)
-      context.stroke()
-      context.beginPath()
-      context.moveTo(centerX, centerY - headHeight / 2)
-      context.lineTo(centerX + imageWidth * 0.015, centerY + headHeight * 0.56)
-      context.stroke()
-      context.setLineDash([])
-      context.strokeStyle = '#e5a048'
-      context.lineWidth = 1.5
-      horizontalGuideY.forEach((lineY) => {
-        context.beginPath()
-        context.moveTo(centerX - headWidth * 0.54, lineY)
-        context.lineTo(centerX + headWidth * 0.54, lineY)
-        context.stroke()
-      })
-      if (level === 'detailed') {
-        context.strokeStyle = '#5f7898'
-        context.lineWidth = 1
-        context.beginPath()
-        context.moveTo(leftVerticalX, centerY - headHeight * 0.2)
-        context.lineTo(leftVerticalX, centerY + headHeight * 0.32)
-        context.moveTo(rightVerticalX, centerY - headHeight * 0.2)
-        context.lineTo(rightVerticalX, centerY + headHeight * 0.32)
-        context.stroke()
-      }
-      ;[
-        [centerX, eyeY],
-        [centerX, noseY],
-        [centerX, mouthY],
-      ].forEach(([pointX, pointY]) => {
-        context.beginPath()
-        context.arc(pointX, pointY, 4, 0, Math.PI * 2)
-        context.fill()
-      })
+      const projectedGuides = getRelevantPortraitRigGuides(projectPortraitRig(constructionModel, {
+        camera: rigParameters.camera,
+        imageWidth,
+        imageHeight,
+        headOffsetX: guideAdjustments.headOffsetX,
+        headOffsetY: guideAdjustments.headOffsetY,
+        guideScale: guideAdjustments.scale,
+      }), rigParameters.pose.yaw)
+      drawPortraitGuides(context, projectedGuides, level, imageWidth, imageHeight)
     }
 
     if ((guideDisplayMode === 'both' || guideDisplayMode === 'assistive') && visionEnabled && visionLandmarks.length > 0) {
@@ -256,7 +413,11 @@ function App() {
     }
 
     context.restore()
-  }, [gridVisible, guideAdjustments, guideDisplayMode, guidesVisible, level, opacity, showComparison, visionEnabled, visionLandmarks, zoom])
+  }, [constructionModel, gridVisible, guideAdjustments, guideDisplayMode, guidesVisible, level, opacity, rigParameters.camera, rigParameters.pose.yaw, showComparison, visionEnabled, visionLandmarks, zoom])
+
+  useEffect(() => {
+    drawRef.current = draw
+  }, [draw])
 
   useEffect(() => {
     draw()
@@ -418,8 +579,14 @@ function App() {
             <input className="range" type="range" min="20" max="100" value={opacity} onChange={(event) => updateProject({ opacity: Number(event.target.value) })} />
           </div>
 
-          <div className="panel-section">
-            <div className="section-title"><span>Ajustements manuels</span></div>
+          <div className="panel-section fit-panel">
+            <div className="section-title"><span>Fitting de référence</span></div>
+            <p className="helper-text">Proposition locale de cadrage et d’inclinaison, jamais une vérité anatomique. Vérifiez puis corrigez le résultat à la main.</p>
+            <button className="fit-action" type="button" disabled={!imageUrl || isFitPending} onClick={() => void fitReference()}>
+              {isFitPending ? 'Analyse en cours…' : 'Analyser et ajuster'}
+            </button>
+            <span className="fit-note">Au premier usage, le modèle MediaPipe est téléchargé ; l’image est analysée dans ce navigateur.</span>
+            <div className="section-title manual-fit-title"><span>Correction manuelle</span></div>
             <label className="control-row compact-control">
               <span>Décalage horizontal</span>
               <input className="range" type="range" min="-0.25" max="0.25" step="0.01" value={guideAdjustments.headOffsetX} onChange={(event) => updateProject({ guideAdjustments: { ...guideAdjustments, headOffsetX: Number(event.target.value) } })} />
@@ -432,6 +599,71 @@ function App() {
               <span>Taille du visage</span>
               <input className="range" type="range" min="0.75" max="1.35" step="0.01" value={guideAdjustments.scale} onChange={(event) => updateProject({ guideAdjustments: { ...guideAdjustments, scale: Number(event.target.value) } })} />
             </label>
+          </div>
+
+          <div className="panel-section rig-panel">
+            <div className="section-title"><span>Modèle de construction</span></div>
+            <div className="method-picker" role="group" aria-label="Méthode de construction">
+              {Object.values(portraitConstructionMethods).map((method) => (
+                <button
+                  key={method.id}
+                  type="button"
+                  className={constructionMethod === method.id ? 'selected' : ''}
+                  aria-pressed={constructionMethod === method.id}
+                  title={method.description}
+                  onClick={() => selectConstructionMethod(method.id)}
+                >
+                  {method.label}
+                </button>
+              ))}
+            </div>
+            <p className="helper-text">{portraitConstructionMethods[constructionMethod].description} La géométrie reste partagée entre les méthodes.</p>
+            <div className="section-title"><span>Vue du rig</span></div>
+            <div className="view-picker" role="group" aria-label="Vues du rig">
+              {(Object.values(portraitRigViewPresets)).map((view) => (
+                <button
+                  key={view.id}
+                  type="button"
+                  className={rigView === view.id ? 'selected' : ''}
+                  aria-pressed={rigView === view.id}
+                  title={view.description}
+                  onClick={() => selectRigView(view.id)}
+                >
+                  {view.label}
+                </button>
+              ))}
+            </div>
+            <p className="helper-text">{portraitRigViewPresets[rigView].description} · orientation ajustable ensuite</p>
+            <div className="section-title"><span>Rig paramétrique · {portraitRigViewPresets[rigView].label}</span></div>
+            <label className="control-row compact-control">
+              <span>Largeur du crâne · {rigParameters.dimensions.cranialWidth.toFixed(2)}×</span>
+              <input className="range" type="range" min="0.78" max="1.22" step="0.01" value={rigParameters.dimensions.cranialWidth} onChange={(event) => updateRigDimension('cranialWidth', Number(event.target.value))} />
+            </label>
+            <label className="control-row compact-control">
+              <span>Largeur de mâchoire · {rigParameters.dimensions.jawWidth.toFixed(2)}×</span>
+              <input className="range" type="range" min="0.72" max="1.28" step="0.01" value={rigParameters.dimensions.jawWidth} onChange={(event) => updateRigDimension('jawWidth', Number(event.target.value))} />
+            </label>
+            <label className="control-row compact-control">
+              <span>Écart des yeux · {rigParameters.dimensions.eyeSpacing.toFixed(2)}×</span>
+              <input className="range" type="range" min="0.82" max="1.18" step="0.01" value={rigParameters.dimensions.eyeSpacing} onChange={(event) => updateRigDimension('eyeSpacing', Number(event.target.value))} />
+            </label>
+            <label className="control-row compact-control">
+              <span>Longueur du nez · {rigParameters.dimensions.noseLength.toFixed(2)}×</span>
+              <input className="range" type="range" min="0.78" max="1.22" step="0.01" value={rigParameters.dimensions.noseLength} onChange={(event) => updateRigDimension('noseLength', Number(event.target.value))} />
+            </label>
+            <label className="control-row compact-control">
+              <span>Orientation horizontale · {Math.round(rigParameters.pose.yaw)}°</span>
+              <input className="range" type="range" min="-88" max="88" step="1" value={rigParameters.pose.yaw} onChange={(event) => updateRigPose('yaw', Number(event.target.value))} />
+            </label>
+            <label className="control-row compact-control">
+              <span>Inclinaison verticale · {Math.round(rigParameters.pose.pitch)}°</span>
+              <input className="range" type="range" min="-45" max="45" step="1" value={rigParameters.pose.pitch} onChange={(event) => updateRigPose('pitch', Number(event.target.value))} />
+            </label>
+            <label className="control-row compact-control">
+              <span>Rotation de tête · {Math.round(rigParameters.pose.roll)}°</span>
+              <input className="range" type="range" min="-45" max="45" step="1" value={rigParameters.pose.roll} onChange={(event) => updateRigPose('roll', Number(event.target.value))} />
+            </label>
+            <p className="helper-text">En 3/4, les volumes sont projetés avec une asymétrie de profondeur. Ajustez le modèle, pas la photo ; les plages préservent des proportions cohérentes.</p>
           </div>
 
           <div className="panel-section">
@@ -459,7 +691,7 @@ function App() {
               <span>Comparer avec le guide</span>
               <input type="checkbox" checked={showComparison} onChange={(event) => updateProject({ showComparison: event.target.checked })} />
             </label>
-            <button className="text-button reset-button" onClick={() => updateProject({ guideAdjustments: { headOffsetX: 0, headOffsetY: 0, scale: 1 }, level: 'standard', showComparison: false, guideDisplayMode: 'both' })}>Réinitialiser les repères</button>
+            <button className="text-button reset-button" onClick={() => updateProject({ guideAdjustments: { headOffsetX: 0, headOffsetY: 0, scale: 1 }, rigParameters: defaultPortraitRigParameters, rigView: 'front', constructionMethod: 'canonical', level: 'construction', showComparison: false, guideDisplayMode: 'both' })}>Réinitialiser le guide et le rig</button>
           </div>
 
           <div className="sidebar-footer">

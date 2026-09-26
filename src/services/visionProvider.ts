@@ -1,8 +1,9 @@
 import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
+import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
+import type { VisionLandmark } from '../types/vision'
 
 export type VisionSuggestion = {
-  landmarks: Array<{ x: number; y: number }>
-  confidence: number
+  landmarks: VisionLandmark[]
   label: string
 }
 
@@ -10,6 +11,7 @@ export type VisionAnalysisResult = {
   suggestion: VisionSuggestion | null
   isAvailable: boolean
   provider: 'none' | 'mediapipe'
+  error?: string
 }
 
 export type VisionProvider = {
@@ -21,8 +23,8 @@ export type VisionProvider = {
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
 const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm'
 
-let faceLandmarker: any = null
-let faceLandmarkerPromise: Promise<any> | null = null
+let faceLandmarker: FaceLandmarker | null = null
+let faceLandmarkerPromise: Promise<FaceLandmarker> | null = null
 
 const loadFaceLandmarker = async () => {
   if (faceLandmarker) return faceLandmarker
@@ -45,14 +47,14 @@ const loadImage = (imageDataUrl: string) => new Promise<HTMLImageElement>((resol
 })
 
 const KEY_FACE_INDICES = [
-  1, 33, 61, 105, 133, 145, 159, 168, 197, 199, 263, 291, 362, 374, 386, 395, 454,
+  1, 10, 33, 61, 105, 127, 133, 145, 152, 159, 168, 197, 199, 234, 263, 291, 338, 356, 362, 374, 386, 395, 454,
 ]
 
-const normalizeLandmarks = (landmarks: Array<{ x: number; y: number }> = []): Array<{ x: number; y: number }> =>
-  landmarks.map((point) => ({ x: point.x, y: point.y }))
+const normalizeLandmarks = (landmarks: NormalizedLandmark[] = []): VisionLandmark[] =>
+  landmarks.map((point, index) => ({ index, x: point.x, y: point.y, z: point.z }))
 
-const keepUsefulLandmarks = (landmarks: Array<{ x: number; y: number }> = []): Array<{ x: number; y: number }> => {
-  const useful = new Map<number, { x: number; y: number }>()
+const keepUsefulLandmarks = (landmarks: VisionLandmark[] = []): VisionLandmark[] => {
+  const useful = new Map<number, VisionLandmark>()
 
   landmarks.forEach((point, index) => {
     if (KEY_FACE_INDICES.includes(index)) {
@@ -96,8 +98,9 @@ export const createVisionProvider = (provider: 'none' | 'mediapipe'): VisionProv
         if (!faceLandmarks.length) {
           return {
             suggestion: null,
-            isAvailable: false,
+            isAvailable: true,
             provider: 'mediapipe',
+            error: 'Aucun visage exploitable n’a été détecté dans cette image.',
           }
         }
 
@@ -106,17 +109,17 @@ export const createVisionProvider = (provider: 'none' | 'mediapipe'): VisionProv
         return {
           suggestion: {
             landmarks: filteredLandmarks,
-            confidence: 0.92,
-            label: 'Aide assistée disponible',
+            label: 'Repères détectés · estimation assistée',
           },
           isAvailable: true,
           provider: 'mediapipe',
         }
-      } catch {
+      } catch (error) {
         return {
           suggestion: null,
           isAvailable: false,
           provider: 'mediapipe',
+          error: error instanceof Error ? error.message : 'L’analyse assistée a échoué.',
         }
       }
     },

@@ -1,4 +1,6 @@
 import type { ProjectDocument } from '../types/project'
+import { normalizeProjectDocument } from '../types/project'
+import { defaultPortraitRigParameters } from '../domain/portraitRig'
 
 const DB_NAME = 'portrait-facile'
 const STORE_NAME = 'projects'
@@ -68,7 +70,7 @@ class ProjectStorage {
       const value = await this.withStore('readonly', async (store) => {
         return new Promise<ProjectDocument | null>((resolve, reject) => {
           const request = store.get(id)
-          request.onsuccess = () => resolve((request.result as ProjectDocument | undefined) ?? null)
+          request.onsuccess = () => resolve(normalizeProjectDocument(request.result))
           request.onerror = () => reject(request.error)
         })
       })
@@ -91,9 +93,11 @@ class ProjectStorage {
           const request = store.getAll()
           request.onsuccess = () => {
             const records = (request.result as Array<ProjectDocument & { activeProjectId?: string }> | undefined) ?? []
-            resolve(records
+            const projects = records
               .filter((item) => item.id !== ACTIVE_PROJECT_KEY)
-              .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)))
+              .map(normalizeProjectDocument)
+              .filter((item): item is ProjectDocument => item !== null)
+            resolve(projects.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)))
           }
           request.onerror = () => reject(request.error)
         })
@@ -119,9 +123,9 @@ class ProjectStorage {
       return new Promise<void>((resolve, reject) => {
         const request = store.put({
           id: ACTIVE_PROJECT_KEY,
-          version: 1,
+          version: 5,
           fileName: 'meta',
-          level: 'standard',
+          level: 'construction',
           gridVisible: true,
           guidesVisible: true,
           opacity: 76,
@@ -131,9 +135,12 @@ class ProjectStorage {
           visionEnabled: false,
           guideDisplayMode: 'both',
           showComparison: false,
+          rigView: 'front',
+          rigParameters: defaultPortraitRigParameters,
+          constructionMethod: 'canonical',
           activeProjectId: id,
           updatedAt: Date.now(),
-        } as ProjectDocument & { activeProjectId?: string })
+        })
         request.onsuccess = () => resolve()
         request.onerror = () => reject(request.error)
       })
