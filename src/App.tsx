@@ -1274,7 +1274,10 @@ function App() {
             )}
           </div>
           <div className="canvas-footer">
-            <span className="status-message"><span className="status-dot" />{status}</span>
+            <span className="status-message" role="status" aria-live="polite">
+              <span className="status-dot" aria-hidden="true" />
+              {status}
+            </span>
             <span className="shortcut-hint"><kbd>G</kbd> Grille <kbd>H</kbd> Repères <span className="assistive-pill">{assistiveStatus}</span></span>
           </div>
         </section>

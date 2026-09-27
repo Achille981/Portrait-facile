@@ -4,6 +4,7 @@
 * { box-sizing:border-box; }
 button, input { font:inherit; }
 button { cursor:pointer; }
+button:focus-visible, input:focus-visible, summary:focus-visible, label:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:2px; }
 .app-shell { min-height:100vh; background:var(--paper); color:var(--ink); font-family:'DM Sans',sans-serif; }
 .topbar { height:74px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; padding:0 42px; background:#fbfaf7; }
 .brand { color:var(--ink); text-decoration:none; font-size:20px; font-weight:700; letter-spacing:-.04em; display:flex; align-items:center; gap:10px; }

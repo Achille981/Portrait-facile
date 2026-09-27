@@ -37,6 +37,23 @@ npm run lint
 npm run build
 ```
 
+## Préparer une mise en production
+
+L'application est une SPA statique : elle peut être publiée sur n'importe quel hébergeur
+servant des fichiers statiques. Avant publication :
+
+```bash
+npm ci
+npm run lint
+npm run build
+npm run preview
+```
+
+Le dossier `dist/` contient la version à publier. Configurez le serveur pour renvoyer
+`index.html` lors des navigations SPA et servez les fichiers en HTTPS. Les projets et
+les images restent stockés localement dans le navigateur de chaque utilisateur ;
+aucune image n'est envoyée à un serveur par défaut.
+
 ## Architecture retenue
 
 - React + TypeScript + Vite : base rapide pour une application locale premium et légère
