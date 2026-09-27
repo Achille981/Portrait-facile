@@ -508,12 +508,13 @@ function App() {
     : 'Importez une image pour commencer')
 
   const assistiveStatus = visionEnabled && visionProviderName !== 'none' ? 'Assistance active' : 'Assistance inactive'
-  const hasGuideCustomization = guideAdjustments.headOffsetX !== 0
+  const hasConstructionCustomization = guideAdjustments.headOffsetX !== 0
     || guideAdjustments.headOffsetY !== 0
     || guideAdjustments.scale !== 1
     || constructionMethod !== 'canonical'
     || rigView !== 'front'
-  const activeWorkflowStep = !imageUrl ? 1 : hasGuideCustomization ? 3 : 2
+    || JSON.stringify(rigParameters) !== JSON.stringify(defaultPortraitRigParameters)
+  const activeWorkflowStep = !imageUrl ? 1 : hasConstructionCustomization ? 3 : 2
 
   useEffect(() => {
     if (!imageUrl || !visionEnabled || visionProviderName === 'none') return
