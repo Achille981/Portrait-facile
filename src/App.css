@@ -34,6 +34,8 @@ h1 { font-size:21px; letter-spacing:-.04em; margin:9px 0 26px; }
 .step small { display:block; font-size:11px; margin-top:2px; }
 .step.active { color:var(--ink); }
 .step.active > span { color:var(--accent); }
+.step.completed { color:#6d9b76; }
+.step.completed > span { color:#6d9b76; }
 .panel-section { padding:23px 0 5px; border-bottom:1px solid var(--line); }
 .project-list-panel { padding-top:16px; }
 .section-title { display:flex; align-items:center; justify-content:space-between; font-size:11px; font-weight:600; margin-bottom:17px; }

@@ -936,10 +936,10 @@ function App() {
           </div>
 
           <div className="step-list" aria-label="Étapes du projet">
-            <div className={`step ${activeWorkflowStep === 1 ? 'active' : ''}`} aria-current={activeWorkflowStep === 1 ? 'step' : undefined}>
+            <div className={`step ${activeWorkflowStep === 1 ? 'active' : ''} ${activeWorkflowStep > 1 ? 'completed' : ''}`} aria-current={activeWorkflowStep === 1 ? 'step' : undefined}>
               <span>01</span><div><strong>Référence</strong><small>Importer une image</small></div>
             </div>
-            <div className={`step ${activeWorkflowStep === 2 ? 'active' : ''}`} aria-current={activeWorkflowStep === 2 ? 'step' : undefined}>
+            <div className={`step ${activeWorkflowStep === 2 ? 'active' : ''} ${activeWorkflowStep > 2 ? 'completed' : ''}`} aria-current={activeWorkflowStep === 2 ? 'step' : undefined}>
               <span>02</span><div><strong>Repères</strong><small>Structurer le visage</small></div>
             </div>
             <div className={`step ${activeWorkflowStep === 3 ? 'active' : ''}`} aria-current={activeWorkflowStep === 3 ? 'step' : undefined}>
