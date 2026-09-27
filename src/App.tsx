@@ -508,6 +508,12 @@ function App() {
     : 'Importez une image pour commencer')
 
   const assistiveStatus = visionEnabled && visionProviderName !== 'none' ? 'Assistance active' : 'Assistance inactive'
+  const hasGuideCustomization = guideAdjustments.headOffsetX !== 0
+    || guideAdjustments.headOffsetY !== 0
+    || guideAdjustments.scale !== 1
+    || constructionMethod !== 'canonical'
+    || rigView !== 'front'
+  const activeWorkflowStep = !imageUrl ? 1 : hasGuideCustomization ? 3 : 2
 
   useEffect(() => {
     if (!imageUrl || !visionEnabled || visionProviderName === 'none') return
@@ -930,9 +936,15 @@ function App() {
           </div>
 
           <div className="step-list" aria-label="Étapes du projet">
-            <div className="step active"><span>01</span><div><strong>Référence</strong><small>Importer une image</small></div></div>
-            <div className="step"><span>02</span><div><strong>Repères</strong><small>Structurer le visage</small></div></div>
-            <div className="step"><span>03</span><div><strong>Finaliser</strong><small>Exporter votre guide</small></div></div>
+            <div className={`step ${activeWorkflowStep === 1 ? 'active' : ''}`} aria-current={activeWorkflowStep === 1 ? 'step' : undefined}>
+              <span>01</span><div><strong>Référence</strong><small>Importer une image</small></div>
+            </div>
+            <div className={`step ${activeWorkflowStep === 2 ? 'active' : ''}`} aria-current={activeWorkflowStep === 2 ? 'step' : undefined}>
+              <span>02</span><div><strong>Repères</strong><small>Structurer le visage</small></div>
+            </div>
+            <div className={`step ${activeWorkflowStep === 3 ? 'active' : ''}`} aria-current={activeWorkflowStep === 3 ? 'step' : undefined}>
+              <span>03</span><div><strong>Finaliser</strong><small>Exporter votre guide</small></div>
+            </div>
           </div>
 
           <div className="panel-section project-list-panel">
