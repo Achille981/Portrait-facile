@@ -28,6 +28,8 @@ const levelLabels: Record<GuideLevel, string> = {
 }
 
 const emptyVisionLandmarks: VisionLandmark[] = []
+const maxReferenceImageBytes = 20 * 1024 * 1024
+const supportedReferenceImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 type GuideCanvasBounds = Readonly<{
   left: number
@@ -256,7 +258,9 @@ function App() {
   const exportActionsRef = useRef<HTMLDivElement>(null)
   const projectBackupInputRef = useRef<HTMLInputElement>(null)
   const guidePointerDragRef = useRef<GuidePointerDrag | null>(null)
+  const referenceImportRequestRef = useRef(0)
   const { project, setProject, isReady, projectList, activeProjectId, switchProject, createProject, duplicateProject, importProject, renameProject, deleteProject } = useProjectStore()
+  const currentProjectIdRef = useRef(project.id)
   const [isDragging, setIsDragging] = useState(false)
   const [isGuideManipulationEnabled, setIsGuideManipulationEnabled] = useState(false)
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false)
@@ -274,6 +278,11 @@ function App() {
     providerName: VisionProviderName
     landmarks: VisionLandmark[]
   } | null>(null)
+
+  useLayoutEffect(() => {
+    currentProjectIdRef.current = project.id
+    referenceImportRequestRef.current += 1
+  }, [project.id])
 
   useEffect(() => {
     if (!isExportMenuOpen) return
@@ -703,31 +712,56 @@ function App() {
     return () => observer.disconnect()
   }, [draw, imageUrl, level, gridVisible, guidesVisible, opacity, visionEnabled, visionLandmarks, zoom])
 
-  const loadFile = (file?: File) => {
-    if (!file || !file.type.startsWith('image/')) {
+  const loadFile = async (file?: File) => {
+    if (!file) return
+    if (!supportedReferenceImageTypes.has(file.type)) {
       setTransientStatus('Format non pris en charge. Utilisez JPG, PNG ou WebP.')
       return
     }
-
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = String(reader.result)
-      const image = new Image()
-      image.onload = () => {
-        imageRef.current = image
-        updateProject({ imageDataUrl: result, fileName: file.name })
-        setTransientStatus('Image prête · ajustez les repères selon votre dessin')
-      }
-      image.src = result
+    if (file.size > maxReferenceImageBytes) {
+      setTransientStatus('Image trop volumineuse. La limite est de 20 Mo.')
+      return
     }
-    reader.readAsDataURL(file)
+
+    const requestId = ++referenceImportRequestRef.current
+    const projectId = project.id
+    setTransientStatus('Chargement et vérification de l’image…')
+
+    try {
+      const result = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          if (typeof reader.result === 'string') resolve(reader.result)
+          else reject(new Error('Le fichier n’a pas pu être lu.'))
+        }
+        reader.onerror = () => reject(new Error('Erreur de lecture du fichier.'))
+        reader.onabort = () => reject(new Error('Lecture du fichier interrompue.'))
+        reader.readAsDataURL(file)
+      })
+      const image = new Image()
+      image.src = result
+      await image.decode()
+
+      if (requestId !== referenceImportRequestRef.current || currentProjectIdRef.current !== projectId) return
+      imageRef.current = image
+      updateProject({ imageDataUrl: result, fileName: file.name })
+      setTransientStatus('Image prête · ajustez les repères selon votre dessin')
+    } catch (error) {
+      if (requestId !== referenceImportRequestRef.current || currentProjectIdRef.current !== projectId) return
+      const details = error instanceof Error ? error.message : 'Erreur inconnue'
+      setTransientStatus(`Impossible d’importer l’image · ${details}`)
+    }
   }
 
-  const onFileChange = (event: ChangeEvent<HTMLInputElement>) => loadFile(event.target.files?.[0])
+  const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    void loadFile(file)
+  }
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setIsDragging(false)
-    loadFile(event.dataTransfer.files[0])
+    void loadFile(event.dataTransfer.files[0])
   }
 
   const handleCreateProject = async () => {
