@@ -14,6 +14,7 @@ Portrait facile est une SPA locale de référence pour le dessin de portrait. El
 - Comparaison guide / assistance
 - Projets enregistrés localement via IndexedDB
 - Création, duplication, renommage, switch et suppression de projets
+- Sauvegarde complète d'un projet en JSON et restauration sous un nouveau projet, photo incluse
 - Export PNG du canvas ou recadré sur la photo à sa résolution d'origine
 - PWA installable basique avec service worker
 - Modèle canonique de tête versionné en coordonnées 3D normalisées, socle du rig paramétrique
@@ -41,6 +42,7 @@ npm run build
 - React + TypeScript + Vite : base rapide pour une application locale premium et légère
 - Canvas 2D : rendu direct à la demande, export net, sans surcharge inutile
 - IndexedDB : persistance des projets et des réglages côté navigateur
+- Sauvegardes JSON versionnées : transfert explicite d'un projet entre navigateurs ou appareils
 - VisionProvider : contrat explicite pour des services assistifs futurs, avec MediaPipe comme implémentation réelle et optionnelle
 - Portrait Construction Rig : socle géométrique indépendant de la résolution, paramétrable et versionné, avec projections de face, 3/4 et profil
 - PWA : manifest et service worker minimaux pour un lancement local plus proche d'une vraie app

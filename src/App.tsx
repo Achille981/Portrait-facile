@@ -13,6 +13,7 @@ import type { ProjectedPortraitRigGuide } from './domain/portraitRigProjection'
 import { suggestReferenceFit } from './domain/referenceFitting'
 import { derivePortraitConstructionModel, portraitConstructionMethods } from './domain/derivedPortraitModels'
 import type { PortraitConstructionMethod } from './domain/derivedPortraitModels'
+import { MAX_PROJECT_BACKUP_BYTES, parseProjectBackup, serializeProjectBackup } from './domain/projectBackup'
 import { createVisionProvider } from './services/visionProvider'
 import { useProjectStore } from './stores/projectStore'
 import type { GuideAdjustments, GuideDisplayMode, GuideLevel, VisionProviderName } from './types/project'
@@ -253,8 +254,9 @@ function App() {
   const drawRef = useRef<() => void>(() => {})
   const frameRef = useRef<HTMLDivElement>(null)
   const exportActionsRef = useRef<HTMLDivElement>(null)
+  const projectBackupInputRef = useRef<HTMLInputElement>(null)
   const guidePointerDragRef = useRef<GuidePointerDrag | null>(null)
-  const { project, setProject, isReady, projectList, activeProjectId, switchProject, createProject, duplicateProject, renameProject, deleteProject } = useProjectStore()
+  const { project, setProject, isReady, projectList, activeProjectId, switchProject, createProject, duplicateProject, importProject, renameProject, deleteProject } = useProjectStore()
   const [isDragging, setIsDragging] = useState(false)
   const [isGuideManipulationEnabled, setIsGuideManipulationEnabled] = useState(false)
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false)
@@ -738,6 +740,50 @@ function App() {
     setTransientStatus(`Projet dupliqué · ${clone.fileName}`)
   }
 
+  const exportProjectBackup = () => {
+    const contents = serializeProjectBackup(project)
+    const blob = new Blob([contents], { type: 'application/json' })
+    if (blob.size > MAX_PROJECT_BACKUP_BYTES) {
+      setTransientStatus('Sauvegarde trop volumineuse pour être exportée par le navigateur.')
+      return
+    }
+
+    const link = document.createElement('a')
+    const baseName = project.fileName.replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*\n\r\t]/g, '-')
+    link.download = `${baseName || 'portrait-facile'}.portrait-facile.json`
+    link.href = URL.createObjectURL(blob)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000)
+    setTransientStatus('Sauvegarde du projet exportée · photo et réglages inclus')
+  }
+
+  const importProjectBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    if (!file) return
+
+    try {
+      if (file.size > MAX_PROJECT_BACKUP_BYTES) {
+        throw new Error('La sauvegarde dépasse la limite de 100 Mo.')
+      }
+      const restored = parseProjectBackup(await file.text())
+      if (restored.imageDataUrl) {
+        const image = new Image()
+        image.src = restored.imageDataUrl
+        await image.decode()
+      }
+      const imported = await importProject(restored)
+      setTransientStatus(`Sauvegarde restaurée dans un nouveau projet · ${imported.fileName}`)
+    } catch (error) {
+      const details = error instanceof Error ? error.message : 'Erreur inconnue'
+      setTransientStatus(`Échec de la restauration · ${details}`)
+    } finally {
+      input.value = ''
+    }
+  }
+
   const handleRenameProject = async (id: string, value: string) => {
     const renamed = await renameProject(id, value)
     if (renamed) {
@@ -879,6 +925,19 @@ function App() {
               ))}
             </div>
             <button className="text-button secondary-project-action" onClick={() => void handleDuplicateProject()}>Dupliquer le projet actuel</button>
+            <div className="project-backup-actions">
+              <button type="button" onClick={exportProjectBackup}>Exporter la sauvegarde</button>
+              <button type="button" onClick={() => projectBackupInputRef.current?.click()}>Restaurer une sauvegarde</button>
+              <input
+                ref={projectBackupInputRef}
+                className="backup-file-input"
+                type="file"
+                accept=".json,application/json"
+                aria-label="Fichier de sauvegarde Portrait Facile"
+                onChange={(event) => { void importProjectBackup(event) }}
+              />
+              <span className="project-backup-note">La restauration crée un projet distinct · 100 Mo maximum</span>
+            </div>
           </div>
 
           <div className="panel-section">

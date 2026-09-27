@@ -83,6 +83,20 @@ export const useProjectStore = () => {
     return clone
   }, [])
 
+  const importProject = useCallback(async (source: ProjectDocument) => {
+    const restored = {
+      ...source,
+      id: `project-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      fileName: `${source.fileName || 'Projet'} (importé)`,
+      updatedAt: Date.now(),
+    }
+    await projectStorage.saveProject(restored)
+    setProject(restored)
+    setActiveProjectId(restored.id)
+    setProjectList((currentList) => [restored, ...currentList.filter((item) => item.id !== restored.id)])
+    return restored
+  }, [])
+
   const renameProject = useCallback(async (id: string, label: string) => {
     const nextName = label.trim() || 'Projet sans titre'
     setProject((current) => {
@@ -120,5 +134,5 @@ export const useProjectStore = () => {
     setProjectList((currentList) => currentList.filter((item) => item.id !== id))
   }, [activeProjectId, projectList, switchProject])
 
-  return { project, setProject, isReady, projectList, activeProjectId, switchProject, createProject, duplicateProject, renameProject, deleteProject }
+  return { project, setProject, isReady, projectList, activeProjectId, switchProject, createProject, duplicateProject, importProject, renameProject, deleteProject }
 }
