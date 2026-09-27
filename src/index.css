@@ -1,2 +1,51 @@
-html, body, #root { margin:0; min-width:320px; min-height:100%; }
-body { background:#f8f7f3; }
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
+
+:root {
+  --paper: 42 32% 94%;
+  --paper-deep: 39 23% 89%;
+  --ink: 34 16% 16%;
+  --ink-soft: 35 10% 34%;
+  --muted: 36 9% 50%;
+  --line: 37 18% 82%;
+  --card: 40 28% 97%;
+  --coral: 10 62% 59%;
+  --coral-deep: 10 50% 43%;
+  --ochre: 35 72% 57%;
+  --sage: 132 23% 50%;
+  --blue: 207 25% 47%;
+  --radius: 0.45rem;
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--coral);
+  --primary: var(--ink);
+  --primary-foreground: 40 28% 97%;
+  --secondary: var(--paper-deep);
+  --secondary-foreground: var(--ink);
+  --muted-foreground: var(--muted);
+  --accent: var(--coral);
+  --accent-foreground: 40 28% 97%;
+  --destructive: 4 60% 50%;
+  --destructive-foreground: 40 28% 97%;
+  --card-foreground: var(--ink);
+  --app-font-sans: 'DM Sans', sans-serif;
+  --app-font-serif: 'Playfair Display', Georgia, serif;
+  --app-font-mono: 'DM Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-width: 320px; min-height: 100%; }
+body {
+  background: hsl(var(--paper));
+  color: hsl(var(--ink));
+  font-family: var(--app-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid hsl(var(--coral));
+  outline-offset: 2px;
+}
+::selection { background: hsl(var(--coral) / .2); }

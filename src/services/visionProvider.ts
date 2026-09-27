@@ -2,26 +2,22 @@ import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision'
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import type { VisionLandmark } from '../types/vision'
 
-export type VisionSuggestion = {
-  landmarks: VisionLandmark[]
-  label: string
-}
-
+export type VisionProviderName = 'none' | 'mediapipe'
+export type VisionSuggestion = { landmarks: VisionLandmark[]; label: string }
 export type VisionAnalysisResult = {
   suggestion: VisionSuggestion | null
   isAvailable: boolean
-  provider: 'none' | 'mediapipe'
+  provider: VisionProviderName
   error?: string
 }
-
 export type VisionProvider = {
-  name: 'none' | 'mediapipe'
-  isAvailable: () => Promise<boolean>
+  name: VisionProviderName
   analyze: (image: string) => Promise<VisionAnalysisResult>
 }
 
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
-const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
+const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm'
+const USEFUL_INDICES = new Set([1, 10, 33, 61, 105, 127, 133, 145, 152, 159, 168, 197, 199, 234, 263, 291, 338, 356, 362, 374, 386, 395, 454])
 
 let faceLandmarker: FaceLandmarker | null = null
 let faceLandmarkerPromise: Promise<FaceLandmarker> | null = null
@@ -47,60 +43,32 @@ const loadFaceLandmarker = async () => {
 const loadImage = (imageDataUrl: string) => new Promise<HTMLImageElement>((resolve, reject) => {
   const image = new Image()
   image.onload = () => resolve(image)
-  image.onerror = () => reject(new Error('Unable to load image for vision analysis'))
+  image.onerror = () => reject(new Error('Impossible de charger l’image pour l’analyse locale.'))
   image.src = imageDataUrl
 })
 
-const KEY_FACE_INDICES = [
-  1, 10, 33, 61, 105, 127, 133, 145, 152, 159, 168, 197, 199, 234, 263, 291, 338, 356, 362, 374, 386, 395, 454,
-]
+const normalizeLandmarks = (landmarks: NormalizedLandmark[]): VisionLandmark[] =>
+  landmarks
+    .map((point, index) => ({ index, x: point.x, y: point.y, z: point.z }))
+    .filter((point) => USEFUL_INDICES.has(point.index))
 
-const normalizeLandmarks = (landmarks: NormalizedLandmark[] = []): VisionLandmark[] =>
-  landmarks.map((point, index) => ({ index, x: point.x, y: point.y, z: point.z }))
-
-const keepUsefulLandmarks = (landmarks: VisionLandmark[] = []): VisionLandmark[] => {
-  const useful = new Map<number, VisionLandmark>()
-
-  landmarks.forEach((point, index) => {
-    if (KEY_FACE_INDICES.includes(index)) {
-      useful.set(index, point)
-    }
-  })
-
-  return Array.from(useful.values())
-}
-
-export const noVisionProvider: VisionProvider = {
+const noVisionProvider: VisionProvider = {
   name: 'none',
-  isAvailable: async () => false,
-  analyze: async () => ({
-    suggestion: null,
-    isAvailable: false,
-    provider: 'none',
-  }),
+  analyze: async () => ({ suggestion: null, isAvailable: false, provider: 'none' }),
 }
 
-export const createVisionProvider = (provider: 'none' | 'mediapipe'): VisionProvider => {
+export const createVisionProvider = (provider: VisionProviderName): VisionProvider => {
   if (provider === 'none') return noVisionProvider
 
   return {
     name: 'mediapipe',
-    isAvailable: async () => {
-      try {
-        await loadFaceLandmarker()
-        return true
-      } catch {
-        return false
-      }
-    },
     analyze: async (image) => {
       try {
-        const imageElement = await loadImage(image)
-        const landmarker = await loadFaceLandmarker()
+        const [imageElement, landmarker] = await Promise.all([loadImage(image), loadFaceLandmarker()])
         const result = landmarker.detect(imageElement)
         const faceLandmarks = result.faceLandmarks?.[0] ?? []
 
-        if (!faceLandmarks.length) {
+        if (faceLandmarks.length === 0) {
           return {
             suggestion: null,
             isAvailable: true,
@@ -109,11 +77,9 @@ export const createVisionProvider = (provider: 'none' | 'mediapipe'): VisionProv
           }
         }
 
-        const filteredLandmarks = keepUsefulLandmarks(normalizeLandmarks(faceLandmarks))
-
         return {
           suggestion: {
-            landmarks: filteredLandmarks,
+            landmarks: normalizeLandmarks(faceLandmarks),
             label: 'Repères détectés · estimation assistée',
           },
           isAvailable: true,

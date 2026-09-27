@@ -1,4 +1,4 @@
-const CACHE = 'portrait-facile-v4'
+const CACHE = 'portrait-facile-v1'
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest']
 
 self.addEventListener('install', (event) => {
@@ -21,19 +21,15 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then(async (cached) => {
       if (cached) return cached
-
       try {
         const response = await fetch(event.request)
         if (response.ok && new URL(event.request.url).origin === self.location.origin) {
           const copy = response.clone()
-          const cache = await caches.open(CACHE)
-          await cache.put(event.request, copy)
+          await (await caches.open(CACHE)).put(event.request, copy)
         }
         return response
       } catch {
-        if (event.request.mode === 'navigate') {
-          return caches.match('/index.html')
-        }
+        if (event.request.mode === 'navigate') return caches.match('/index.html')
         throw new Error('Ressource indisponible hors ligne')
       }
     }),
