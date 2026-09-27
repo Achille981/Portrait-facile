@@ -119,8 +119,8 @@ export function suggestReferenceFit(
   const referenceCenterY = (referenceBounds.top + referenceBounds.bottom) / 2
   const modelCenterX = (modelBounds.left + modelBounds.right) / 2
   const modelCenterY = (modelBounds.top + modelBounds.bottom) / 2
-  const requestedOffsetX = referenceCenterX - modelCenterX * scale
-  const requestedOffsetY = referenceCenterY - modelCenterY * scale
+  const requestedOffsetX = referenceCenterX - (0.51 + (modelCenterX - 0.51) * scale)
+  const requestedOffsetY = referenceCenterY - (0.43 + (modelCenterY - 0.43) * scale)
   const headOffsetX = clamp(requestedOffsetX, -0.25, 0.25)
   const headOffsetY = clamp(requestedOffsetY, -0.25, 0.25)
 

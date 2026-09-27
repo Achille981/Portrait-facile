@@ -24,7 +24,7 @@ export type PortraitRigProjectionSettings = Readonly<{
   guideScale?: number
 }>
 
-const BASE_SCALE = 0.235
+const BASE_SCALE = 0.52
 const CAMERA_DISTANCE = 4
 const ELLIPSE_SEGMENTS = 48
 
