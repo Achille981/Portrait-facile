@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import { createPortraitRig, defaultPortraitRigParameters, initializePortraitRigView, portraitRigViewPresets } from './domain/portraitRig'
-import type { PortraitRigDimensions, PortraitRigPose, PortraitRigView } from './domain/portraitRig'
+import type {
+  PortraitRigDimensions,
+  PortraitRigExpression,
+  PortraitRigGaze,
+  PortraitRigPose,
+  PortraitRigView,
+} from './domain/portraitRig'
 import { getRelevantPortraitRigGuides, projectPortraitRig } from './domain/portraitRigProjection'
 import type { ProjectedPortraitRigGuide } from './domain/portraitRigProjection'
 import { suggestReferenceFit } from './domain/referenceFitting'
@@ -170,6 +176,24 @@ function App() {
             perspective: 0.18 + Math.min(Math.abs(value) / 82, 1) * 0.6,
           },
         } : {}),
+      },
+    })
+  }
+
+  const updateRigGaze = (key: keyof PortraitRigGaze, value: number) => {
+    updateProject({
+      rigParameters: {
+        ...rigParameters,
+        gaze: { ...rigParameters.gaze, [key]: value },
+      },
+    })
+  }
+
+  const updateRigExpression = (key: keyof PortraitRigExpression, value: number) => {
+    updateProject({
+      rigParameters: {
+        ...rigParameters,
+        expression: { ...rigParameters.expression, [key]: value },
       },
     })
   }
@@ -664,6 +688,56 @@ function App() {
               <input className="range" type="range" min="-45" max="45" step="1" value={rigParameters.pose.roll} onChange={(event) => updateRigPose('roll', Number(event.target.value))} />
             </label>
             <p className="helper-text">En 3/4, les volumes sont projetés avec une asymétrie de profondeur. Ajustez le modèle, pas la photo ; les plages préservent des proportions cohérentes.</p>
+            <details className="rig-advanced">
+              <summary>Regard</summary>
+              <label className="control-row compact-control">
+                <span>Horizontal · {rigParameters.gaze.horizontal.toFixed(2)}</span>
+                <input className="range" type="range" min="-1" max="1" step="0.05" value={rigParameters.gaze.horizontal} onChange={(event) => updateRigGaze('horizontal', Number(event.target.value))} />
+              </label>
+              <label className="control-row compact-control">
+                <span>Vertical · {rigParameters.gaze.vertical.toFixed(2)}</span>
+                <input className="range" type="range" min="-1" max="1" step="0.05" value={rigParameters.gaze.vertical} onChange={(event) => updateRigGaze('vertical', Number(event.target.value))} />
+              </label>
+              <label className="control-row compact-control">
+                <span>Convergence · {rigParameters.gaze.convergence.toFixed(2)}</span>
+                <input className="range" type="range" min="-1" max="1" step="0.05" value={rigParameters.gaze.convergence} onChange={(event) => updateRigGaze('convergence', Number(event.target.value))} />
+              </label>
+            </details>
+            <details className="rig-advanced">
+              <summary>Expression</summary>
+              <label className="control-row compact-control">
+                <span>Ouverture de bouche · {rigParameters.expression.mouthOpen.toFixed(2)}</span>
+                <input className="range" type="range" min="0" max="1" step="0.05" value={rigParameters.expression.mouthOpen} onChange={(event) => updateRigExpression('mouthOpen', Number(event.target.value))} />
+              </label>
+              <label className="control-row compact-control">
+                <span>Sourire · {rigParameters.expression.smile.toFixed(2)}</span>
+                <input className="range" type="range" min="0" max="1" step="0.05" value={rigParameters.expression.smile} onChange={(event) => updateRigExpression('smile', Number(event.target.value))} />
+              </label>
+              <label className="control-row compact-control">
+                <span>Ouverture de la mâchoire · {rigParameters.expression.jawOpen.toFixed(2)}</span>
+                <input className="range" type="range" min="0" max="1" step="0.05" value={rigParameters.expression.jawOpen} onChange={(event) => updateRigExpression('jawOpen', Number(event.target.value))} />
+              </label>
+              <label className="control-row compact-control">
+                <span>Plissement des yeux · {rigParameters.expression.squint.toFixed(2)}</span>
+                <input className="range" type="range" min="0" max="1" step="0.05" value={rigParameters.expression.squint} onChange={(event) => updateRigExpression('squint', Number(event.target.value))} />
+              </label>
+              <label className="control-row compact-control">
+                <span>Sourcil gauche · {rigParameters.expression.browRaiseLeft.toFixed(2)}</span>
+                <input className="range" type="range" min="-1" max="1" step="0.05" value={rigParameters.expression.browRaiseLeft} onChange={(event) => updateRigExpression('browRaiseLeft', Number(event.target.value))} />
+              </label>
+              <label className="control-row compact-control">
+                <span>Sourcil droit · {rigParameters.expression.browRaiseRight.toFixed(2)}</span>
+                <input className="range" type="range" min="-1" max="1" step="0.05" value={rigParameters.expression.browRaiseRight} onChange={(event) => updateRigExpression('browRaiseRight', Number(event.target.value))} />
+              </label>
+              <label className="control-row compact-control">
+                <span>Œil gauche · {rigParameters.expression.eyeOpennessLeft.toFixed(2)}</span>
+                <input className="range" type="range" min="0" max="1" step="0.05" value={rigParameters.expression.eyeOpennessLeft} onChange={(event) => updateRigExpression('eyeOpennessLeft', Number(event.target.value))} />
+              </label>
+              <label className="control-row compact-control">
+                <span>Œil droit · {rigParameters.expression.eyeOpennessRight.toFixed(2)}</span>
+                <input className="range" type="range" min="0" max="1" step="0.05" value={rigParameters.expression.eyeOpennessRight} onChange={(event) => updateRigExpression('eyeOpennessRight', Number(event.target.value))} />
+              </label>
+            </details>
           </div>
 
           <div className="panel-section">

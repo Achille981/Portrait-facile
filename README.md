@@ -19,6 +19,7 @@ Portrait facile est une SPA locale de référence pour le dessin de portrait. El
 - Bibliothèque de départ Front / 3/4 gauche / 3/4 droit / profils gauche et droit, sur le même rig paramétrique
 - Ajustement initial assisté par repères MediaPipe (échelle, position et roulis), toujours vérifiable et corrigeable à la main
 - Méthodes canonique, Loomis, Reilly et Asaro dérivées du rig partagé, sélectionnées et sauvegardées par projet
+- Réglages directs du regard et de l'expression, bornés et sauvegardés par projet
 
 ## Démarrer
 
@@ -58,4 +59,4 @@ L'application ne prétend pas détecter une vérité objective du visage. Elle f
 
 ## Suivant possible
 
-L'édition directe du regard et de l'expression reste à intégrer ; les méthodes dérivées partagent toujours le même modèle canonique.
+Les prochaines évolutions possibles portent sur l'édition visuelle des repères et des contrôles d'export plus riches ; les méthodes dérivées partagent toujours le même modèle canonique.
