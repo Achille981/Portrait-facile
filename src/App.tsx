@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, DragEvent } from 'react'
+import type { ChangeEvent, DragEvent, PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortraitRig, defaultPortraitRigParameters, initializePortraitRigView, portraitRigViewPresets } from './domain/portraitRig'
 import type {
   PortraitRigDimensions,
@@ -15,7 +15,7 @@ import { derivePortraitConstructionModel, portraitConstructionMethods } from './
 import type { PortraitConstructionMethod } from './domain/derivedPortraitModels'
 import { createVisionProvider } from './services/visionProvider'
 import { useProjectStore } from './stores/projectStore'
-import type { GuideDisplayMode, GuideLevel, VisionProviderName } from './types/project'
+import type { GuideAdjustments, GuideDisplayMode, GuideLevel, VisionProviderName } from './types/project'
 import type { VisionLandmark } from './types/vision'
 import './App.css'
 
@@ -27,6 +27,28 @@ const levelLabels: Record<GuideLevel, string> = {
 }
 
 const emptyVisionLandmarks: VisionLandmark[] = []
+
+type GuideCanvasBounds = Readonly<{
+  left: number
+  top: number
+  right: number
+  bottom: number
+  imageLeft: number
+  imageTop: number
+  imageWidth: number
+  imageHeight: number
+}>
+
+type GuidePointerDrag = {
+  pointerId: number
+  mode: 'move' | 'scale'
+  projectId: string
+  startX: number
+  startY: number
+  startBounds: GuideCanvasBounds
+  startAdjustments: GuideAdjustments
+  latestAdjustments: GuideAdjustments
+}
 
 const guideLevelRank = {
   essential: 1,
@@ -47,6 +69,50 @@ const guideColors: Record<ProjectedPortraitRigGuide['category'], string> = {
   jaw: '#d86b54',
   ears: '#607f9d',
   neck: '#d86b54',
+}
+
+function getGuideCanvasBounds(
+  guides: readonly ProjectedPortraitRigGuide[],
+  level: GuideLevel,
+  imageLeft: number,
+  imageTop: number,
+  imageWidth: number,
+  imageHeight: number,
+): GuideCanvasBounds | null {
+  const points = guides.flatMap((guide) => {
+    if (!guide.visibility || guideLevelRank[guide.level] > guideLevelRank[level]) return []
+    const geometry = guide.geometry
+    if (geometry.kind === 'point') return [geometry.position]
+    if (geometry.kind === 'line') return [geometry.from, geometry.to]
+    return geometry.points
+  })
+  if (points.length === 0) return null
+
+  const left = imageLeft + clamp(Math.min(...points.map((point) => point.x)), 0, 1) * imageWidth
+  const top = imageTop + clamp(Math.min(...points.map((point) => point.y)), 0, 1) * imageHeight
+  const right = imageLeft + clamp(Math.max(...points.map((point) => point.x)), 0, 1) * imageWidth
+  const bottom = imageTop + clamp(Math.max(...points.map((point) => point.y)), 0, 1) * imageHeight
+
+  if (![left, top, right, bottom].every(Number.isFinite) || right - left < 24 || bottom - top < 24) return null
+  return { left, top, right, bottom, imageLeft, imageTop, imageWidth, imageHeight }
+}
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const keepGuideCenterWhileScaling = (
+  bounds: GuideCanvasBounds,
+  startAdjustments: GuideAdjustments,
+  nextScale: number,
+): GuideAdjustments => {
+  const centerX = ((bounds.left + bounds.right) / 2 - bounds.imageLeft) / bounds.imageWidth
+  const centerY = ((bounds.top + bounds.bottom) / 2 - bounds.imageTop) / bounds.imageHeight
+  const canonicalCenterX = 0.51 + (centerX - startAdjustments.headOffsetX - 0.51) / startAdjustments.scale
+  const canonicalCenterY = 0.43 + (centerY - startAdjustments.headOffsetY - 0.43) / startAdjustments.scale
+  return {
+    headOffsetX: clamp(centerX - (0.51 + (canonicalCenterX - 0.51) * nextScale), -0.25, 0.25),
+    headOffsetY: clamp(centerY - (0.43 + (canonicalCenterY - 0.43) * nextScale), -0.25, 0.25),
+    scale: nextScale,
+  }
 }
 
 function drawPortraitGuides(
@@ -98,8 +164,12 @@ function App() {
   const imageRef = useRef<HTMLImageElement | null>(null)
   const drawRef = useRef<() => void>(() => {})
   const frameRef = useRef<HTMLDivElement>(null)
+  const guidePointerDragRef = useRef<GuidePointerDrag | null>(null)
   const { project, setProject, isReady, projectList, activeProjectId, switchProject, createProject, duplicateProject, renameProject, deleteProject } = useProjectStore()
   const [isDragging, setIsDragging] = useState(false)
+  const [isGuideManipulationEnabled, setIsGuideManipulationEnabled] = useState(false)
+  const [guideCanvasBounds, setGuideCanvasBounds] = useState<GuideCanvasBounds | null>(null)
+  const [guidePreviewAdjustments, setGuidePreviewAdjustments] = useState<GuideAdjustments | null>(null)
   const [fitRequest, setFitRequest] = useState<{ projectId: string; imageUrl: string } | null>(null)
   const [transientStatus, setTransientStatus] = useState<string | null>(null)
   const fitRequestRef = useRef(0)
@@ -119,6 +189,7 @@ function App() {
   const opacity = project.opacity
   const zoom = project.zoom
   const guideAdjustments = project.guideAdjustments
+  const displayedGuideAdjustments = guidePreviewAdjustments ?? guideAdjustments
   const rigParameters = project.rigParameters
   const rigView = project.rigView
   const constructionMethod = project.constructionMethod
@@ -126,6 +197,7 @@ function App() {
   const visionEnabled = project.visionEnabled
   const guideDisplayMode = project.guideDisplayMode
   const showComparison = project.showComparison
+  const canManipulateGuides = Boolean(imageUrl && guidesVisible && (guideDisplayMode === 'both' || guideDisplayMode === 'guide'))
   const visionLandmarks = imageUrl && visionEnabled && visionProviderName !== 'none'
     && visionResult?.imageUrl === imageUrl && visionResult.providerName === visionProviderName
     ? visionResult.landmarks
@@ -209,6 +281,104 @@ function App() {
   const selectConstructionMethod = (method: PortraitConstructionMethod) => {
     updateProject({ constructionMethod: method })
     setTransientStatus(`Méthode ${portraitConstructionMethods[method].label} sélectionnée · dérivée du rig canonique`)
+  }
+
+  const startGuidePointer = (event: ReactPointerEvent<HTMLButtonElement>, mode: GuidePointerDrag['mode']) => {
+    if (!guideCanvasBounds || !canManipulateGuides || event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const frameBounds = frameRef.current?.getBoundingClientRect()
+    if (!frameBounds) return
+    guidePointerDragRef.current = {
+      pointerId: event.pointerId,
+      mode,
+      projectId: project.id,
+      startX: event.clientX - frameBounds.left,
+      startY: event.clientY - frameBounds.top,
+      startBounds: guideCanvasBounds,
+      startAdjustments: guideAdjustments,
+      latestAdjustments: guideAdjustments,
+    }
+  }
+
+  const moveGuidePointer = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = guidePointerDragRef.current
+    const frameBounds = frameRef.current?.getBoundingClientRect()
+    if (!drag || drag.pointerId !== event.pointerId || !frameBounds || drag.projectId !== project.id) return
+    const pointerX = event.clientX - frameBounds.left
+    const pointerY = event.clientY - frameBounds.top
+    let nextAdjustments: GuideAdjustments
+
+    if (drag.mode === 'move') {
+      nextAdjustments = {
+        ...drag.startAdjustments,
+        headOffsetX: clamp(
+          drag.startAdjustments.headOffsetX + (pointerX - drag.startX) / drag.startBounds.imageWidth,
+          -0.25,
+          0.25,
+        ),
+        headOffsetY: clamp(
+          drag.startAdjustments.headOffsetY + (pointerY - drag.startY) / drag.startBounds.imageHeight,
+          -0.25,
+          0.25,
+        ),
+      }
+    } else {
+      const centerX = (drag.startBounds.left + drag.startBounds.right) / 2
+      const centerY = (drag.startBounds.top + drag.startBounds.bottom) / 2
+      const initialRadius = Math.max(12, Math.hypot(drag.startX - centerX, drag.startY - centerY))
+      const nextScale = clamp(
+        drag.startAdjustments.scale * Math.hypot(pointerX - centerX, pointerY - centerY) / initialRadius,
+        0.75,
+        1.35,
+      )
+      nextAdjustments = keepGuideCenterWhileScaling(drag.startBounds, drag.startAdjustments, nextScale)
+    }
+
+    drag.latestAdjustments = nextAdjustments
+    setGuidePreviewAdjustments(nextAdjustments)
+  }
+
+  const finishGuidePointer = (event: ReactPointerEvent<HTMLButtonElement>, commit: boolean) => {
+    const drag = guidePointerDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    guidePointerDragRef.current = null
+    setGuidePreviewAdjustments(null)
+
+    if (commit && drag.projectId === project.id) {
+      updateProject({ guideAdjustments: drag.latestAdjustments })
+      setTransientStatus('Repères repositionnés · ajustement enregistré')
+    }
+  }
+
+  const handleGuideKeyboard = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    mode: GuidePointerDrag['mode'],
+  ) => {
+    if (!guideCanvasBounds || !canManipulateGuides) return
+    const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+      : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1
+        : 0
+    if (!direction) return
+    event.preventDefault()
+
+    if (mode === 'move') {
+      const horizontalDelta = event.key === 'ArrowRight' ? 0.01 : event.key === 'ArrowLeft' ? -0.01 : 0
+      const verticalDelta = event.key === 'ArrowDown' ? 0.01 : event.key === 'ArrowUp' ? -0.01 : 0
+      updateProject({
+        guideAdjustments: {
+          ...guideAdjustments,
+          headOffsetX: clamp(guideAdjustments.headOffsetX + horizontalDelta, -0.25, 0.25),
+          headOffsetY: clamp(guideAdjustments.headOffsetY + verticalDelta, -0.25, 0.25),
+        },
+      })
+      setTransientStatus('Repères déplacés au clavier · ajustement enregistré')
+      return
+    }
+
+    const nextScale = clamp(guideAdjustments.scale + direction * 0.02, 0.75, 1.35)
+    updateProject({ guideAdjustments: keepGuideCenterWhileScaling(guideCanvasBounds, guideAdjustments, nextScale) })
+    setTransientStatus('Taille des repères ajustée au clavier · modification enregistrée')
   }
 
   const status = transientStatus ?? (isReady && (project.imageDataUrl || project.fileName)
@@ -366,7 +536,10 @@ function App() {
     context.clearRect(0, 0, width, height)
     context.fillStyle = '#ede9e1'
     context.fillRect(0, 0, width, height)
-    if (!image) return
+    if (!image) {
+      setGuideCanvasBounds(null)
+      return
+    }
 
     const imageScale = Math.min(width / image.width, height / image.height) * zoom
     const imageWidth = image.width * imageScale
@@ -398,17 +571,30 @@ function App() {
         context.stroke()
       }
     }
+    let nextGuideBounds: GuideCanvasBounds | null = null
     if ((guideDisplayMode === 'both' || guideDisplayMode === 'guide') && guidesVisible) {
       const projectedGuides = getRelevantPortraitRigGuides(projectPortraitRig(constructionModel, {
         camera: rigParameters.camera,
         imageWidth,
         imageHeight,
-        headOffsetX: guideAdjustments.headOffsetX,
-        headOffsetY: guideAdjustments.headOffsetY,
-        guideScale: guideAdjustments.scale,
+        headOffsetX: displayedGuideAdjustments.headOffsetX,
+        headOffsetY: displayedGuideAdjustments.headOffsetY,
+        guideScale: displayedGuideAdjustments.scale,
       }), rigParameters.pose.yaw)
       drawPortraitGuides(context, projectedGuides, level, imageWidth, imageHeight)
+      if (canManipulateGuides) {
+        nextGuideBounds = getGuideCanvasBounds(projectedGuides, level, x, y, imageWidth, imageHeight)
+      }
     }
+    setGuideCanvasBounds((current) => {
+      if (!nextGuideBounds && !current) return current
+      if (nextGuideBounds && current
+        && Math.abs(nextGuideBounds.left - current.left) < 0.1
+        && Math.abs(nextGuideBounds.top - current.top) < 0.1
+        && Math.abs(nextGuideBounds.right - current.right) < 0.1
+        && Math.abs(nextGuideBounds.bottom - current.bottom) < 0.1) return current
+      return nextGuideBounds
+    })
 
     if ((guideDisplayMode === 'both' || guideDisplayMode === 'assistive') && visionEnabled && visionLandmarks.length > 0) {
       const landmarkAlpha = showComparison ? 0.7 : 0.35
@@ -437,7 +623,7 @@ function App() {
     }
 
     context.restore()
-  }, [constructionModel, gridVisible, guideAdjustments, guideDisplayMode, guidesVisible, level, opacity, rigParameters.camera, rigParameters.pose.yaw, showComparison, visionEnabled, visionLandmarks, zoom])
+  }, [canManipulateGuides, constructionModel, displayedGuideAdjustments, gridVisible, guideDisplayMode, guidesVisible, level, opacity, rigParameters.camera, rigParameters.pose.yaw, showComparison, visionEnabled, visionLandmarks, zoom])
 
   useEffect(() => {
     drawRef.current = draw
@@ -613,15 +799,15 @@ function App() {
             <div className="section-title manual-fit-title"><span>Correction manuelle</span></div>
             <label className="control-row compact-control">
               <span>Décalage horizontal</span>
-              <input className="range" type="range" min="-0.25" max="0.25" step="0.01" value={guideAdjustments.headOffsetX} onChange={(event) => updateProject({ guideAdjustments: { ...guideAdjustments, headOffsetX: Number(event.target.value) } })} />
+              <input className="range" type="range" min="-0.25" max="0.25" step="0.01" value={displayedGuideAdjustments.headOffsetX} onChange={(event) => updateProject({ guideAdjustments: { ...displayedGuideAdjustments, headOffsetX: Number(event.target.value) } })} />
             </label>
             <label className="control-row compact-control">
               <span>Décalage vertical</span>
-              <input className="range" type="range" min="-0.25" max="0.25" step="0.01" value={guideAdjustments.headOffsetY} onChange={(event) => updateProject({ guideAdjustments: { ...guideAdjustments, headOffsetY: Number(event.target.value) } })} />
+              <input className="range" type="range" min="-0.25" max="0.25" step="0.01" value={displayedGuideAdjustments.headOffsetY} onChange={(event) => updateProject({ guideAdjustments: { ...displayedGuideAdjustments, headOffsetY: Number(event.target.value) } })} />
             </label>
             <label className="control-row compact-control">
               <span>Taille du visage</span>
-              <input className="range" type="range" min="0.75" max="1.35" step="0.01" value={guideAdjustments.scale} onChange={(event) => updateProject({ guideAdjustments: { ...guideAdjustments, scale: Number(event.target.value) } })} />
+              <input className="range" type="range" min="0.75" max="1.35" step="0.01" value={displayedGuideAdjustments.scale} onChange={(event) => updateProject({ guideAdjustments: { ...displayedGuideAdjustments, scale: Number(event.target.value) } })} />
             </label>
           </div>
 
@@ -782,6 +968,22 @@ function App() {
               <span className="zoom-label">{Math.round(zoom * 100)}%</span>
               <button className="tool-button" onClick={() => updateProject({ zoom: Math.min(2, Number((zoom + 0.1).toFixed(2))) })}>＋</button>
               <button className="fit-button" onClick={() => updateProject({ zoom: 1 })}>Ajuster</button>
+              <button
+                className={`manipulate-button ${isGuideManipulationEnabled ? 'selected' : ''}`}
+                type="button"
+                aria-pressed={isGuideManipulationEnabled}
+                disabled={!canManipulateGuides}
+                title="Déplacer les repères dans le cadre ou redimensionner avec la poignée"
+                onClick={() => {
+                  const nextEnabled = !isGuideManipulationEnabled
+                  setIsGuideManipulationEnabled(nextEnabled)
+                  setTransientStatus(nextEnabled
+                    ? 'Glissez le cadre pour déplacer les repères ou la poignée pour les redimensionner'
+                    : 'Manipulation directe désactivée')
+                }}
+              >
+                ↔ Guide
+              </button>
               <button className="export-button" disabled={!imageUrl} onClick={exportPng}>Exporter <span>↗</span></button>
             </div>
           </div>
@@ -793,6 +995,40 @@ function App() {
             onDrop={onDrop}
           >
             <canvas ref={canvasRef} aria-label="Aperçu du portrait et de ses repères" />
+            {isGuideManipulationEnabled && guideCanvasBounds && canManipulateGuides && (
+              <div
+                className="guide-selection"
+                style={{
+                  left: guideCanvasBounds.left,
+                  top: guideCanvasBounds.top,
+                  width: guideCanvasBounds.right - guideCanvasBounds.left,
+                  height: guideCanvasBounds.bottom - guideCanvasBounds.top,
+                }}
+              >
+                <button
+                  className="guide-move-target"
+                  type="button"
+                  aria-label="Déplacer les repères"
+                  title="Glisser pour déplacer · flèches du clavier pour ajuster"
+                  onPointerDown={(event) => startGuidePointer(event, 'move')}
+                  onPointerMove={moveGuidePointer}
+                  onPointerUp={(event) => finishGuidePointer(event, true)}
+                  onPointerCancel={(event) => finishGuidePointer(event, false)}
+                  onKeyDown={(event) => handleGuideKeyboard(event, 'move')}
+                />
+                <button
+                  className="guide-scale-handle"
+                  type="button"
+                  aria-label={`Redimensionner les repères · ${Math.round(displayedGuideAdjustments.scale * 100)} %`}
+                  title="Glisser pour redimensionner · flèches haut/bas pour ajuster"
+                  onPointerDown={(event) => startGuidePointer(event, 'scale')}
+                  onPointerMove={moveGuidePointer}
+                  onPointerUp={(event) => finishGuidePointer(event, true)}
+                  onPointerCancel={(event) => finishGuidePointer(event, false)}
+                  onKeyDown={(event) => handleGuideKeyboard(event, 'scale')}
+                />
+              </div>
+            )}
             {!imageUrl && (
               <div className="drop-message">
                 <div className="upload-icon">↥</div>

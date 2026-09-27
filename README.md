@@ -8,6 +8,7 @@ Portrait facile est une SPA locale de référence pour le dessin de portrait. El
 - Grille de construction et repères de face
 - Quatre niveaux de guide : essentiel, construction, détaillé, expert
 - Ajustements manuels du guide : décalage horizontal, vertical, taille du visage
+- Manipulation directe du guide sur le canvas : glisser pour déplacer, poignée pour redimensionner, contrôles clavier accessibles
 - Contrôle d'opacité, zoom et mode d'affichage
 - Assistance visuelle MediaPipe optionnelle, non autoritaire et explicitement assistive
 - Comparaison guide / assistance
@@ -59,4 +60,4 @@ L'application ne prétend pas détecter une vérité objective du visage. Elle f
 
 ## Suivant possible
 
-Les prochaines évolutions possibles portent sur l'édition visuelle des repères et des contrôles d'export plus riches ; les méthodes dérivées partagent toujours le même modèle canonique.
+Les prochaines évolutions possibles portent sur des contrôles d'export plus riches ; les méthodes dérivées partagent toujours le même modèle canonique.
