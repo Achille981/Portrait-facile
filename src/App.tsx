@@ -121,9 +121,10 @@ function drawPortraitGuides(
   level: GuideLevel,
   imageWidth: number,
   imageHeight: number,
+  lineScaleOverride?: number,
 ) {
   const maxLevel = guideLevelRank[level]
-  const lineScale = Math.max(0.8, Math.min(1.5, Math.min(imageWidth, imageHeight) / 700))
+  const lineScale = lineScaleOverride ?? Math.max(0.8, Math.min(1.5, Math.min(imageWidth, imageHeight) / 700))
 
   guides.forEach((guide) => {
     if (!guide.visibility || guideLevelRank[guide.level] > maxLevel) return
@@ -159,15 +160,106 @@ function drawPortraitGuides(
   })
 }
 
+function drawPortraitComposition(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  imageWidth: number,
+  imageHeight: number,
+  options: {
+    constructionModel: ReturnType<typeof derivePortraitConstructionModel>
+    camera: typeof defaultPortraitRigParameters.camera
+    yaw: number
+    guideAdjustments: GuideAdjustments
+    level: GuideLevel
+    gridVisible: boolean
+    guidesVisible: boolean
+    opacity: number
+    guideDisplayMode: GuideDisplayMode
+    visionEnabled: boolean
+    visionLandmarks: readonly VisionLandmark[]
+    showComparison: boolean
+    scaleLineworkToImage?: boolean
+  },
+): ProjectedPortraitRigGuide[] | null {
+  const lineScale = options.scaleLineworkToImage
+    ? Math.max(0.8, Math.min(8, Math.min(imageWidth, imageHeight) / 700))
+    : 1
+  context.drawImage(image, 0, 0, imageWidth, imageHeight)
+  context.save()
+  context.globalAlpha = options.opacity / 100
+
+  if (options.gridVisible) {
+    context.strokeStyle = '#f8f4e9'
+    context.lineWidth = lineScale
+    for (let column = 1; column < 4; column += 1) {
+      const lineX = (imageWidth / 4) * column
+      context.beginPath()
+      context.moveTo(lineX, 0)
+      context.lineTo(lineX, imageHeight)
+      context.stroke()
+    }
+    for (let row = 1; row < 5; row += 1) {
+      const lineY = (imageHeight / 5) * row
+      context.beginPath()
+      context.moveTo(0, lineY)
+      context.lineTo(imageWidth, lineY)
+      context.stroke()
+    }
+  }
+
+  let projectedGuides: ProjectedPortraitRigGuide[] | null = null
+  if ((options.guideDisplayMode === 'both' || options.guideDisplayMode === 'guide') && options.guidesVisible) {
+    projectedGuides = getRelevantPortraitRigGuides(projectPortraitRig(options.constructionModel, {
+      camera: options.camera,
+      imageWidth,
+      imageHeight,
+      headOffsetX: options.guideAdjustments.headOffsetX,
+      headOffsetY: options.guideAdjustments.headOffsetY,
+      guideScale: options.guideAdjustments.scale,
+    }), options.yaw)
+    drawPortraitGuides(context, projectedGuides, options.level, imageWidth, imageHeight, options.scaleLineworkToImage ? lineScale : undefined)
+  }
+
+  if ((options.guideDisplayMode === 'both' || options.guideDisplayMode === 'assistive')
+    && options.visionEnabled && options.visionLandmarks.length > 0) {
+    context.save()
+    context.globalAlpha = options.showComparison ? 0.7 : 0.35
+    context.strokeStyle = '#5ea2ff'
+    context.fillStyle = '#5ea2ff'
+    context.lineWidth = 1.2 * lineScale
+    context.beginPath()
+    options.visionLandmarks.forEach((point, index) => {
+      const x = point.x * imageWidth
+      const y = point.y * imageHeight
+      if (index === 0) context.moveTo(x, y)
+      else context.lineTo(x, y)
+    })
+    context.stroke()
+    options.visionLandmarks.forEach((point) => {
+      context.beginPath()
+      context.arc(point.x * imageWidth, point.y * imageHeight, 1.8 * lineScale, 0, Math.PI * 2)
+      context.fill()
+    })
+    context.restore()
+  }
+
+  context.restore()
+  return projectedGuides
+}
+
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imageRef = useRef<HTMLImageElement | null>(null)
   const drawRef = useRef<() => void>(() => {})
   const frameRef = useRef<HTMLDivElement>(null)
+  const exportActionsRef = useRef<HTMLDivElement>(null)
   const guidePointerDragRef = useRef<GuidePointerDrag | null>(null)
   const { project, setProject, isReady, projectList, activeProjectId, switchProject, createProject, duplicateProject, renameProject, deleteProject } = useProjectStore()
   const [isDragging, setIsDragging] = useState(false)
   const [isGuideManipulationEnabled, setIsGuideManipulationEnabled] = useState(false)
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [sourceImageInfo, setSourceImageInfo] = useState<{ imageUrl: string; width: number; height: number } | null>(null)
   const [guideCanvasBounds, setGuideCanvasBounds] = useState<GuideCanvasBounds | null>(null)
   const [guidePreviewAdjustments, setGuidePreviewAdjustments] = useState<GuideAdjustments | null>(null)
   const [fitRequest, setFitRequest] = useState<{ projectId: string; imageUrl: string } | null>(null)
@@ -181,7 +273,26 @@ function App() {
     landmarks: VisionLandmark[]
   } | null>(null)
 
+  useEffect(() => {
+    if (!isExportMenuOpen) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !exportActionsRef.current?.contains(event.target)) {
+        setIsExportMenuOpen(false)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsExportMenuOpen(false)
+    }
+    window.addEventListener('pointerdown', closeOnOutsidePointer)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('pointerdown', closeOnOutsidePointer)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [isExportMenuOpen])
+
   const imageUrl = project.imageDataUrl ?? ''
+  const sourceImageSize = sourceImageInfo?.imageUrl === imageUrl ? sourceImageInfo : null
   const fileName = project.fileName
   const level = project.level
   const gridVisible = project.gridVisible
@@ -481,6 +592,7 @@ function App() {
       image.onload = () => {
         if (!active) return
         imageRef.current = image
+        setSourceImageInfo({ imageUrl, width: image.naturalWidth, height: image.naturalHeight })
         drawRef.current()
       }
       image.onerror = () => {
@@ -546,47 +658,26 @@ function App() {
     const imageHeight = image.height * imageScale
     const x = (width - imageWidth) / 2
     const y = (height - imageHeight) / 2
-    context.drawImage(image, x, y, imageWidth, imageHeight)
-
     context.save()
     context.translate(x, y)
-    context.globalAlpha = opacity / 100
-    if (gridVisible) {
-      context.strokeStyle = '#f8f4e9'
-      context.lineWidth = 1
-      const columns = 4
-      const rows = 5
-      for (let column = 1; column < columns; column += 1) {
-        const lineX = (imageWidth / columns) * column
-        context.beginPath()
-        context.moveTo(lineX, 0)
-        context.lineTo(lineX, imageHeight)
-        context.stroke()
-      }
-      for (let row = 1; row < rows; row += 1) {
-        const lineY = (imageHeight / rows) * row
-        context.beginPath()
-        context.moveTo(0, lineY)
-        context.lineTo(imageWidth, lineY)
-        context.stroke()
-      }
-    }
-    let nextGuideBounds: GuideCanvasBounds | null = null
-    if ((guideDisplayMode === 'both' || guideDisplayMode === 'guide') && guidesVisible) {
-      const projectedGuides = getRelevantPortraitRigGuides(projectPortraitRig(constructionModel, {
-        camera: rigParameters.camera,
-        imageWidth,
-        imageHeight,
-        headOffsetX: displayedGuideAdjustments.headOffsetX,
-        headOffsetY: displayedGuideAdjustments.headOffsetY,
-        guideScale: displayedGuideAdjustments.scale,
-      }), rigParameters.pose.yaw)
-      drawPortraitGuides(context, projectedGuides, level, imageWidth, imageHeight)
-      if (canManipulateGuides) {
-        nextGuideBounds = getGuideCanvasBounds(projectedGuides, level, x, y, imageWidth, imageHeight)
-      }
-    }
+    const projectedGuides = drawPortraitComposition(context, image, imageWidth, imageHeight, {
+      constructionModel,
+      camera: rigParameters.camera,
+      yaw: rigParameters.pose.yaw,
+      guideAdjustments: displayedGuideAdjustments,
+      level,
+      gridVisible,
+      guidesVisible,
+      opacity,
+      guideDisplayMode,
+      visionEnabled,
+      visionLandmarks,
+      showComparison,
+    })
     setGuideCanvasBounds((current) => {
+      const nextGuideBounds = canManipulateGuides && projectedGuides
+        ? getGuideCanvasBounds(projectedGuides, level, x, y, imageWidth, imageHeight)
+        : null
       if (!nextGuideBounds && !current) return current
       if (nextGuideBounds && current
         && Math.abs(nextGuideBounds.left - current.left) < 0.1
@@ -595,32 +686,6 @@ function App() {
         && Math.abs(nextGuideBounds.bottom - current.bottom) < 0.1) return current
       return nextGuideBounds
     })
-
-    if ((guideDisplayMode === 'both' || guideDisplayMode === 'assistive') && visionEnabled && visionLandmarks.length > 0) {
-      const landmarkAlpha = showComparison ? 0.7 : 0.35
-      context.save()
-      context.globalAlpha = landmarkAlpha
-      context.strokeStyle = '#5ea2ff'
-      context.fillStyle = '#5ea2ff'
-      context.lineWidth = 1.2
-      context.beginPath()
-      visionLandmarks.forEach((point, index) => {
-        const x = point.x * imageWidth
-        const y = point.y * imageHeight
-        if (index === 0) {
-          context.moveTo(x, y)
-        } else {
-          context.lineTo(x, y)
-        }
-      })
-      context.stroke()
-      visionLandmarks.forEach((point) => {
-        context.beginPath()
-        context.arc(point.x * imageWidth, point.y * imageHeight, 1.8, 0, Math.PI * 2)
-        context.fill()
-      })
-      context.restore()
-    }
 
     context.restore()
   }, [canManipulateGuides, constructionModel, displayedGuideAdjustments, gridVisible, guideDisplayMode, guidesVisible, level, opacity, rigParameters.camera, rigParameters.pose.yaw, showComparison, visionEnabled, visionLandmarks, zoom])
@@ -680,17 +745,71 @@ function App() {
     }
   }
 
-  const exportPng = () => {
-    const canvas = canvasRef.current
-    if (!canvas || !imageRef.current) return
-    canvas.toBlob((blob) => {
-      if (!blob) return
+  const exportPng = async (resolution: 'viewport' | 'source' = 'viewport') => {
+    const visibleCanvas = canvasRef.current
+    const image = imageRef.current
+    if (isExporting) return
+    if (!visibleCanvas || !image) {
+      setTransientStatus('Veuillez attendre le chargement de la photo avant l’export.')
+      return
+    }
+
+    const outputWidth = resolution === 'viewport' ? visibleCanvas.width : image.naturalWidth
+    const outputHeight = resolution === 'viewport' ? visibleCanvas.height : image.naturalHeight
+    if (outputWidth > 16384 || outputHeight > 16384 || outputWidth * outputHeight > 40_000_000) {
+      setTransientStatus('Image trop grande pour l’export haute résolution. Utilisez l’export du canvas.')
+      setIsExportMenuOpen(false)
+      return
+    }
+
+    setIsExporting(true)
+    setIsExportMenuOpen(false)
+    setTransientStatus('Préparation de l’export PNG…')
+
+    try {
+      let canvasToEncode = visibleCanvas
+      if (resolution === 'source') {
+        const sourceCanvas = document.createElement('canvas')
+        canvasToEncode = sourceCanvas
+        sourceCanvas.width = outputWidth
+        sourceCanvas.height = outputHeight
+        const context = sourceCanvas.getContext('2d')
+        if (!context) throw new Error('Contexte de dessin indisponible')
+        drawPortraitComposition(context, image, outputWidth, outputHeight, {
+          constructionModel,
+          camera: rigParameters.camera,
+          yaw: rigParameters.pose.yaw,
+          guideAdjustments: displayedGuideAdjustments,
+          level,
+          gridVisible,
+          guidesVisible,
+          opacity,
+          guideDisplayMode,
+          visionEnabled,
+          visionLandmarks,
+          showComparison,
+          scaleLineworkToImage: true,
+        })
+      }
+
+      const blob = await new Promise<Blob | null>((resolve) => canvasToEncode.toBlob(resolve, 'image/png'))
+      if (!blob) throw new Error('Le navigateur n’a pas pu encoder le PNG')
+
       const link = document.createElement('a')
-      link.download = `${fileName.replace(/\.[^.]+$/, '') || 'portrait-guide'}.png`
+      const baseName = fileName.replace(/\.[^.]+$/, '') || 'portrait-guide'
+      link.download = `${baseName}${resolution === 'source' ? '-resolution-originale' : ''}.png`
       link.href = URL.createObjectURL(blob)
+      document.body.appendChild(link)
       link.click()
-      URL.revokeObjectURL(link.href)
-    }, 'image/png')
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(link.href), 1000)
+      setTransientStatus(`PNG exporté · ${outputWidth} × ${outputHeight} px`)
+    } catch (error) {
+      const details = error instanceof Error ? error.message : 'Erreur inconnue'
+      setTransientStatus(`Échec de l’export PNG · ${details}`)
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   return (
@@ -984,7 +1103,29 @@ function App() {
               >
                 ↔ Guide
               </button>
-              <button className="export-button" disabled={!imageUrl} onClick={exportPng}>Exporter <span>↗</span></button>
+              <div className="export-actions" ref={exportActionsRef}>
+                <button className="export-button" disabled={!imageUrl || !sourceImageSize || isExporting} onClick={() => { void exportPng() }}>
+                  {isExporting ? 'Export…' : 'Exporter'} <span>↗</span>
+                </button>
+                <button
+                  className="export-options-button"
+                  type="button"
+                  aria-label="Options d’export"
+                  aria-expanded={isExportMenuOpen}
+                  disabled={!imageUrl || !sourceImageSize || isExporting}
+                  onClick={() => setIsExportMenuOpen((open) => !open)}
+                >
+                  ▾
+                </button>
+                {isExportMenuOpen && (
+                  <div className="export-menu-panel">
+                    <button type="button" disabled={!sourceImageSize} onClick={() => { void exportPng('source') }}>
+                      <strong>Résolution de la photo</strong>
+                      <span>{sourceImageSize ? `${sourceImageSize.width} × ${sourceImageSize.height} px` : 'Chargement des dimensions…'} · recadré à l’image</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <div

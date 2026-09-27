@@ -14,7 +14,7 @@ Portrait facile est une SPA locale de référence pour le dessin de portrait. El
 - Comparaison guide / assistance
 - Projets enregistrés localement via IndexedDB
 - Création, duplication, renommage, switch et suppression de projets
-- Export PNG de la composition finale
+- Export PNG du canvas ou recadré sur la photo à sa résolution d'origine
 - PWA installable basique avec service worker
 - Modèle canonique de tête versionné en coordonnées 3D normalisées, socle du rig paramétrique
 - Bibliothèque de départ Front / 3/4 gauche / 3/4 droit / profils gauche et droit, sur le même rig paramétrique
@@ -60,4 +60,4 @@ L'application ne prétend pas détecter une vérité objective du visage. Elle f
 
 ## Suivant possible
 
-Les prochaines évolutions possibles portent sur des contrôles d'export plus riches ; les méthodes dérivées partagent toujours le même modèle canonique.
+Les prochaines évolutions possibles portent sur des formats d'export supplémentaires ; les méthodes dérivées partagent toujours le même modèle canonique.
