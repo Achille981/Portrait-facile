@@ -6,6 +6,7 @@ import { defineConfig } from 'vite'
 const root = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
+  base: '/Portrait-facile/',
   plugins: [react()],
   resolve: { alias: { '@': path.resolve(root, 'src') } },
   server: { host: '0.0.0.0', port: 5173 },
